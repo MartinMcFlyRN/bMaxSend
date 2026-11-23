@@ -1,0 +1,73 @@
+# bMaxSend - nginx + PHP-FPM
+#
+# 1) Panel: bmaxsend.example.com  (app_url in config/config.php)
+# 2) Tracking host + customer alias domains: the same document root.
+#    Every alias domain (news.customer.tld) is a CNAME to track.bmaxsend.example.com
+#    (tracking.cname_target). Only the public email endpoints (/v /o /c /u) answer
+#    on those hosts; the application returns 404 for unknown hosts.
+
+# --- Panel -----------------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name bmaxsend.example.com;
+    root /var/www/bmaxsend/public;
+    index index.php;
+
+    ssl_certificate     /etc/letsencrypt/live/bmaxsend.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/bmaxsend.example.com/privkey.pem;
+
+    client_max_body_size 25m;   # CSV imports
+
+    # Optional: restrict the panel to some networks
+    # allow 203.0.113.0/24; deny all;
+
+    location / { try_files $uri /index.php$is_args$args; }
+
+    location ~ \.php$ {
+        try_files $fastcgi_script_name =404;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+    }
+    location ~ /\. { deny all; }
+}
+
+# --- Tracking host and alias domains (catch-all) -----------------------------
+# HTTP is always available; it is used for alias domains with "Use HTTPS" off and
+# for the ACME HTTP-01 challenge when issuing certificates for alias domains.
+server {
+    listen 80 default_server;
+    server_name _;
+    root /var/www/bmaxsend/public;
+
+    location /.well-known/acme-challenge/ { root /var/www/acme; }
+    location / { try_files $uri /index.php$is_args$args; }
+    location ~ \.php$ {
+        try_files $fastcgi_script_name =404;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+    }
+}
+
+# HTTPS for alias domains: one server block per certificate, e.g. issued with
+#   certbot certonly --webroot -w /var/www/acme -d news.customer.tld
+# (or use a SAN certificate / OpenResty with lua-resty-auto-ssl for on-demand TLS).
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name track.bmaxsend.example.com news.customer.tld;
+    root /var/www/bmaxsend/public;
+
+    ssl_certificate     /etc/letsencrypt/live/track.bmaxsend.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/track.bmaxsend.example.com/privkey.pem;
+
+    location / { try_files $uri /index.php$is_args$args; }
+    location ~ \.php$ {
+        try_files $fastcgi_script_name =404;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+    }
+}

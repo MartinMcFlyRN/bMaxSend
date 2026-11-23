@@ -1,0 +1,20 @@
+{
+    "name": "martinmcflyrn/bmaxsend",
+    "description": "bMaxSend - multi-tenant newsletter / DEM platform (admin, reseller, client)",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-sodium": "*",
+        "ext-mbstring": "*",
+        "ext-json": "*",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "autoload": {
+        "psr-4": { "App\\": "app/" },
+        "files": [ "app/helpers.php" ]
+    },
+    "config": { "optimize-autoloader": true, "sort-packages": true }
+}

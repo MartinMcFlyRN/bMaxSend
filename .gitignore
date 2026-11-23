@@ -1,0 +1,10 @@
+/vendor/
+/config/config.php
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/worker.lock
+/composer.local.json
+/composer.local.lock
+.DS_Store
+.idea/
+.vscode/
