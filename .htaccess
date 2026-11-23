@@ -1,0 +1,12 @@
+# bMaxSend - fallback for hosts where the document root cannot point to /public
+# (better: set the document root to the "public" folder, e.g. in Plesk
+#  Hosting settings > Document root = httpdocs/public).
+# Every request is sent to public/: app/, config/, vendor/, storage/... are never reachable.
+Options -Indexes
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+<IfModule !mod_rewrite.c>
+    Require all denied
+</IfModule>

@@ -1,0 +1,20 @@
+# bMaxSend - Apache (document root = this "public" folder)
+Options -Indexes -MultiViews
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # Real files (assets) are served directly, everything else goes to the front controller
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L,QSA]
+</IfModule>
+
+<IfModule !mod_rewrite.c>
+    ErrorDocument 404 /index.php
+</IfModule>
+
+# CSV imports
+<IfModule mod_php.c>
+    php_value upload_max_filesize 25M
+    php_value post_max_size 26M
+</IfModule>

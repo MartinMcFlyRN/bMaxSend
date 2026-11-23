@@ -69,6 +69,19 @@ chown -R www-data:www-data storage
 
 Configurare nginx come in `docs/nginx.conf.example` (document root = `public/`).
 
+### Apache / Plesk
+
+Sono inclusi i file `.htaccess` (serve `mod_rewrite` e `AllowOverride All`):
+
+- **consigliato:** document root sulla cartella `public/` (in Plesk: *Impostazioni hosting → Radice documenti* = `httpdocs/public`); usa `public/.htaccess`.
+- **alternativa:** document root sulla cartella del progetto; il `.htaccess` principale gira tutte le richieste dentro `public/`, e `app/`, `config/`, `bin/`, `storage/`, `vendor/`… restano irraggiungibili.
+
+Per i domini alias in Apache aggiungerli come *alias di dominio* (Plesk) o `ServerAlias` del virtual host del tracking, ciascuno con il proprio certificato.
+
+### Accesso
+
+Il login è su **`<app_url>/login`** (es. `https://bmaxsend.example.com/login`); aprendo `<app_url>/` senza sessione si viene rimandati lì. Le credenziali del primo admin sono quelle inserite in `bin/install.php`.
+
 ### Cron
 
 ```cron
