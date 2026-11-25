@@ -36,7 +36,7 @@ final class DashboardController extends Controller
         } else {
             $stats = [
                 __('Lists') => DB::value('SELECT COUNT(*) FROM lists WHERE client_id = ?', [$u['id']]),
-                __('Active subscribers') => DB::value("SELECT COUNT(DISTINCT s.email) FROM subscribers s JOIN lists l ON l.id = s.list_id WHERE l.client_id = ? AND s.status = 'subscribed'", [$u['id']]),
+                __('Active subscribers') => DB::value("SELECT COUNT(DISTINCT s.email) FROM subscribers s JOIN lists l ON l.id = s.list_id WHERE l.client_id = ? AND s.status = 1", [$u['id']]),
                 __('Campaigns') => DB::value('SELECT COUNT(*) FROM campaigns WHERE client_id = ?', [$u['id']]),
                 __('Emails sent this month') => CampaignQueue::sentThisMonth((int) $u['id'])
                     . ($u['monthly_limit'] !== null ? ' / ' . nf($u['monthly_limit']) : ''),

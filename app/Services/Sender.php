@@ -189,7 +189,7 @@ final class Sender
     private function markBounced(array $c, array $r): void
     {
         if ($r['subscriber_id']) {
-            DB::query("UPDATE subscribers SET status = 'bounced', updated_at = UTC_TIMESTAMP() WHERE id = ?", [$r['subscriber_id']]);
+            DB::query("UPDATE subscribers SET status = 0, updated_at = UTC_TIMESTAMP() WHERE id = ?", [$r['subscriber_id']]);
         }
         DB::query("INSERT IGNORE INTO suppressions (client_id, email, reason, created_at) VALUES (?, ?, 'bounced', UTC_TIMESTAMP())",
             [$c['client_id'], $r['email']]);
@@ -284,11 +284,25 @@ final class Sender
         }
     }
 
+    /** Sample values for the custom fields of the campaign's lists (used by tests/previews). */
+    public static function sampleFields(array $c): array
+    {
+        if (empty($c['id'])) {
+            return [];
+        }
+        $out = [];
+        foreach (DB::all('SELECT DISTINCT f.field_key, f.label FROM list_fields f JOIN campaign_lists cl ON cl.list_id = f.list_id
+                          WHERE cl.campaign_id = ?', [$c['id']]) as $f) {
+            $out[$f['field_key']] = '[' . $f['label'] . ']';
+        }
+        return $out;
+    }
+
     /** Send a single test message (no tracking). Returns [ok, error]. */
     public static function sendTest(array $c, array $smtp, string $to): array
     {
         $builder = new MessageBuilder($c, DomainService::baseUrlForCampaign($c));
-        $r = ['email' => $to, 'first_name' => 'Mario', 'last_name' => 'Rossi', 'fields' => [], 'token' => 'test-' . random_token(8)];
+        $r = ['email' => $to, 'name' => 'Mario Rossi', 'fields' => self::sampleFields($c), 'track' => 0, 'token' => 'test-' . random_token(8)];
         $msg = $builder->build($r);
         $msg['subject'] = '[TEST] ' . $msg['subject'];
         $m = SmtpService::mailer($smtp);

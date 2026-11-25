@@ -107,13 +107,13 @@ final class PublicController extends Controller
         DB::transaction(function () use ($r, $c, $all) {
             // Unsubscribe the address from the lists the campaign was sent to.
             DB::query(
-                "UPDATE subscribers SET status = 'unsubscribed', unsubscribed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
-                 WHERE email = ? AND status = 'subscribed' AND list_id IN (SELECT list_id FROM campaign_lists WHERE campaign_id = ?)",
+                "UPDATE subscribers SET status = 2, unsubscribed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
+                 WHERE email = ? AND status <> 2 AND list_id IN (SELECT list_id FROM campaign_lists WHERE campaign_id = ?)",
                 [$r['email'], $c['id']]
             );
             if ($r['subscriber_id']) {
-                DB::query("UPDATE subscribers SET status = 'unsubscribed', unsubscribed_at = COALESCE(unsubscribed_at, UTC_TIMESTAMP())
-                           WHERE id = ? AND status = 'subscribed'", [$r['subscriber_id']]);
+                DB::query('UPDATE subscribers SET status = 2, unsubscribed_at = COALESCE(unsubscribed_at, UTC_TIMESTAMP())
+                           WHERE id = ? AND status <> 2', [$r['subscriber_id']]);
             }
             if ($all) {
                 DB::query("INSERT IGNORE INTO suppressions (client_id, email, reason, created_at) VALUES (?, ?, 'unsubscribed', UTC_TIMESTAMP())",

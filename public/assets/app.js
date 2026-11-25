@@ -48,7 +48,7 @@
   const frame = document.getElementById('live-preview');
   if (src && frame) {
     let t;
-    const sample = { first_name: 'Mario', last_name: 'Rossi', full_name: 'Mario Rossi', email: 'mario.rossi@example.com', unsubscribe_url: '#', webversion_url: '#' };
+    const sample = { name: 'Mario Rossi', first_name: 'Mario Rossi', full_name: 'Mario Rossi', email: 'mario.rossi@example.com', unsubscribe_url: '#', webversion_url: '#' };
     const render = () => {
       frame.srcdoc = src.value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*(?:\|([^}]*))?\}\}/g, (m, k, fb) => sample[k.toLowerCase()] || fb || '');
     };

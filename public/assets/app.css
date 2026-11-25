@@ -112,6 +112,9 @@ fieldset[disabled]{opacity:.85}
 .pagination a.current{background:var(--primary);color:#fff;border-color:var(--primary)}
 .bulkbar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .bulkbar select{width:auto}
+.field-row{display:flex;gap:6px;align-items:center}
+.field-row input{padding:5px 8px}
+.table-scroll{overflow-x:auto}
 .kv{display:inline-block;background:#f3f5f9;padding:0 5px;border-radius:3px;margin:1px}
 .editor-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .editor-head h2{margin:0}

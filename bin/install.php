@@ -51,6 +51,7 @@ $sql = preg_replace('/^--.*$/m', '', $sql);
 foreach (array_filter(array_map('trim', explode(';', $sql))) as $stmt) {
     DB::pdo()->exec($stmt);
 }
+App\Services\Migrator::run(fn(string $m) => print("$m\n"));
 echo "Database schema OK.\n";
 
 // 3. first admin

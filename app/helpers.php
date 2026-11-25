@@ -190,3 +190,11 @@ function checked(mixed $cond): string
 {
     return $cond ? ' checked' : '';
 }
+
+/** Badge for a subscriber status: 0 disabled, 1 enabled, 2 unsubscribed. */
+function sub_status_badge(int|string $status): string
+{
+    $status = (int) $status;
+    $cls = [0 => 'paused', 1 => 'active', 2 => 'unsubscribed'][$status] ?? 'paused';
+    return '<span class="badge badge-' . $cls . '" title="' . $status . '">' . e(\App\Services\ListFields::statusLabel($status)) . '</span>';
+}

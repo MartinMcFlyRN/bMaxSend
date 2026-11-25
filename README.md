@@ -10,7 +10,7 @@ Stack: **PHP 8.1+ · MariaDB 10.6+ / MySQL 8 · nginx + PHP-FPM**, nessun framew
 |---|---|
 | **Admin** | Tutto: crea admin, rivenditori e clienti; crea i server SMTP e li assegna; gestisce tutti i domini; può forzare la verifica di un dominio; può "accedere come" qualsiasi utente. |
 | **Rivenditore** | Crea e gestisce i propri clienti (con limite opzionale `max_clients`); assegna ai propri clienti i server SMTP ricevuti dall'admin; gestisce i domini propri e dei propri clienti; può "accedere come" i propri clienti. |
-| **Cliente** | Crea liste di indirizzi (anche da CSV), campagne DEM con editor HTML e anteprima, invii di test, invii schedulati; vede i report (aperture, clic, disiscrizioni, errori); gestisce la propria lista di esclusione e i propri domini alias. |
+| **Cliente** | Crea liste di indirizzi (anche da CSV, con campi personalizzati), campagne DEM con editor HTML e anteprima, invii di test, invii schedulati; vede i report (aperture, clic, disiscrizioni, errori); gestisce la propria lista di esclusione e i propri domini alias. |
 
 Per i clienti si possono impostare i limiti di **iscritti massimi** ed **email al mese** (vuoto = illimitato).
 
@@ -37,16 +37,33 @@ Servono per la **versione web** delle email, i **link tracciati** e la **pagina 
 
 Sugli hostname alias rispondono **solo** gli endpoint pubblici (`/v`, `/o`, `/c`, `/u`); il pannello risponde solo sull'host di `app_url`, gli host sconosciuti ricevono 404. Per l'HTTPS sugli alias serve un certificato per ciascun hostname (vedi `docs/nginx.conf.example`).
 
+## Liste e iscritti
+
+Ogni iscritto ha i campi fissi:
+
+| Campo | Valori | Default se manca (import o inserimento manuale) |
+|---|---|---|
+| `email` | obbligatorio | riga scartata |
+| `nome` | facoltativo | — |
+| `stato` | `1` abilitato · `0` disabilitato · `2` disiscritto | **0** |
+| `track` | `1` aperture/clic tracciati · `0` non tracciati | **0** |
+
+Ricevono le campagne solo gli iscritti con **stato 1**; aperture e clic vengono tracciati solo se `track = 1` (e il tracciamento è attivo nella campagna).
+
+**Campi personalizzati**: ogni colonna del CSV diversa da quelle fisse diventa automaticamente un campo della lista (dalla prima riga del file), sia in importazione sia in aggiornamento. I campi si possono aggiungere, rinominare (i valori vengono spostati) o eliminare nella pagina della lista, e si usano nelle email come `{{chiave}}` (es. colonna "Città" → `{{citta}}`). Intestazioni riconosciute per i campi fissi: `email`/`mail`, `nome`/`name`, `stato`/`status`, `track`/`tracking`.
+
+Con "aggiorna gli esistenti" vengono modificate solo le colonne presenti nel file; un indirizzo con stato 2 (disiscritto) non viene mai riattivato da un import. L'export CSV usa lo stesso formato dell'import.
+
 ## Campagne e invio
 
 - Editor HTML con anteprima live (iframe sandbox, script disabilitati), versione testo generata automaticamente se lasciata vuota, preheader, modello di partenza.
-- Segnaposto: `{{first_name}}`, `{{last_name}}`, `{{full_name}}`, `{{email}}`, qualsiasi colonna importata da CSV (`{{citta}}`), valore di riserva `{{first_name|cliente}}`, `{{unsubscribe_url}}`, `{{webversion_url}}`, `{{date}}`, `{{year}}`.
+- Segnaposto: `{{name}}`, `{{email}}`, qualsiasi campo personalizzato della lista (`{{citta}}`), valore di riserva `{{name|cliente}}`, `{{unsubscribe_url}}`, `{{webversion_url}}`, `{{date}}`, `{{year}}`.
 - Se l'HTML non contiene `{{unsubscribe_url}}` viene aggiunto automaticamente un piè di pagina con il link di disiscrizione.
 - Header `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058, richiesto da Gmail/Yahoo per gli invii massivi), `List-Id`, `Feedback-ID`.
 - Tracciamento aperture (pixel) e clic (redirect) attivabili per campagna.
 - Stati: bozza → programmata → in invio ⇄ in pausa → inviata / annullata. Le campagne si possono duplicare.
-- Alla partenza viene creata una "fotografia" dei destinatari: deduplicati per email, esclusi disiscritti, rimbalzati e indirizzi nella lista di esclusione del cliente.
-- Errori temporanei: nuovo tentativo fino a `worker.max_attempts`. Errori permanenti 5xx sul destinatario: iscritto marcato come *rimbalzato* e aggiunto alla lista di esclusione.
+- Alla partenza viene creata una "fotografia" dei destinatari: solo iscritti con stato 1, deduplicati per email, esclusi gli indirizzi nella lista di esclusione del cliente.
+- Errori temporanei: nuovo tentativo fino a `worker.max_attempts`. Errori permanenti 5xx sul destinatario: iscritto portato a stato 0 e aggiunto alla lista di esclusione (motivo *bounced*).
 - Se il server SMTP viene disattivato/revocato, il cliente è sospeso o raggiunge il limite mensile, la campagna va **in pausa** con il motivo indicato; si riprende dal report.
 
 ## Installazione
@@ -82,6 +99,10 @@ Per i domini alias in Apache aggiungerli come *alias di dominio* (Plesk) o `Serv
 
 Il login è su **`<app_url>/login`** (es. `https://bmaxsend.example.com/login`); aprendo `<app_url>/` senza sessione si viene rimandati lì. Le credenziali del primo admin sono quelle inserite in `bin/install.php`.
 
+### Aggiornamenti
+
+Dopo ogni `git pull` eseguire `php bin/migrate.php` (applica le migrazioni in `database/migrations`).
+
 ### Cron
 
 ```cron
@@ -105,8 +126,8 @@ app/Core          router, DB (PDO), sessione, CSRF, auth e gerarchia, i18n, cifr
 app/Controllers   Auth, Dashboard, Profile, User, Smtp, Domain, List, Campaign, Public (tracking)
 app/Services      SmtpService, DomainService, MessageBuilder, CampaignQueue, Sender (worker)
 app/Views         template PHP
-bin/              install, worker, check-domains, cleanup, keygen, dev-router
-database/         schema.sql
+bin/              install, migrate, worker, check-domains, cleanup, keygen, dev-router
+database/         schema.sql, migrations/
 lang/             en.php (lingua base, chiavi = testo inglese), it.php
 public/           index.php (front controller), assets
 ```

@@ -64,7 +64,7 @@ final class CampaignController extends Controller
     private function form(array $c, array $selectedLists): void
     {
         $me = $this->user();
-        $lists = DB::all("SELECT l.id, l.name, (SELECT COUNT(*) FROM subscribers s WHERE s.list_id = l.id AND s.status = 'subscribed') AS n
+        $lists = DB::all("SELECT l.id, l.name, (SELECT COUNT(*) FROM subscribers s WHERE s.list_id = l.id AND s.status = 1) AS n
                           FROM lists l WHERE l.client_id = ? ORDER BY l.name", [$me['id']]);
         $this->view('campaigns/form', [
             'title' => $c['id'] ? __('Edit campaign') : __('New campaign'),
@@ -72,6 +72,8 @@ final class CampaignController extends Controller
             'smtps' => SmtpService::availableFor($me, true),
             'domains' => DomainService::usableBy($me),
             'estimate' => $c['id'] ? CampaignQueue::estimate($c) : null,
+            'fieldTags' => DB::all('SELECT f.field_key, f.label, l.name AS list_name FROM list_fields f JOIN lists l ON l.id = f.list_id
+                                    WHERE l.client_id = ? ORDER BY l.name, f.position', [$me['id']]),
             'me' => $me,
         ]);
     }
@@ -117,7 +119,7 @@ final class CampaignController extends Controller
         $c = $this->find($id);
         $me = $this->user();
         $builder = new MessageBuilder($c, DomainService::baseUrlForCampaign($c));
-        $msg = $builder->build(['email' => $me['email'], 'first_name' => 'Mario', 'last_name' => 'Rossi', 'fields' => [], 'token' => 'preview'], true);
+        $msg = $builder->build(['email' => $me['email'], 'name' => 'Mario Rossi', 'fields' => Sender::sampleFields($c), 'token' => 'preview'], true);
         header('Content-Security-Policy: sandbox allow-popups allow-popups-to-escape-sandbox; script-src \'none\'');
         if (input('format') === 'text') {
             header('Content-Type: text/plain; charset=utf-8');
@@ -303,10 +305,10 @@ final class CampaignController extends Controller
         header('Content-Disposition: attachment; filename="campaign-' . $c['id'] . '-report.csv"');
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, ['email', 'first_name', 'last_name', 'status', 'sent_at', 'opened_at', 'opens', 'clicked_at', 'clicks', 'unsubscribed_at', 'error'], ';');
+        fputcsv($out, ['email', 'name', 'status', 'sent_at', 'opened_at', 'opens', 'clicked_at', 'clicks', 'unsubscribed_at', 'error'], ';');
         $st = DB::query('SELECT * FROM campaign_recipients WHERE campaign_id = ? ORDER BY id', [$c['id']]);
         while ($r = $st->fetch()) {
-            fputcsv($out, [$r['email'], $r['first_name'], $r['last_name'], $r['status'], $r['sent_at'], $r['opened_at'], $r['open_count'],
+            fputcsv($out, [$r['email'], $r['name'], $r['status'], $r['sent_at'], $r['opened_at'], $r['open_count'],
                 $r['clicked_at'], $r['click_count'], $r['unsubscribed_at'], $r['error']], ';');
         }
         fclose($out);
@@ -409,9 +411,9 @@ final class CampaignController extends Controller
     {
         $it = \App\Core\Lang::locale() === 'it';
         $t = $it
-            ? ['Visualizza nel browser', 'Ciao {{first_name|cliente}},', 'Scrivi qui il contenuto della tua newsletter.', 'Scopri di più',
+            ? ['Visualizza nel browser', 'Ciao {{name|cliente}},', 'Scrivi qui il contenuto della tua newsletter.', 'Scopri di più',
                'Hai ricevuto questa email perché sei iscritto alla nostra newsletter.', 'Disiscriviti', 'it']
-            : ['View in browser', 'Hello {{first_name|there}},', 'Write the content of your newsletter here.', 'Learn more',
+            : ['View in browser', 'Hello {{name|there}},', 'Write the content of your newsletter here.', 'Learn more',
                'You received this email because you subscribed to our newsletter.', 'Unsubscribe', 'en'];
         return <<<HTML
 <!DOCTYPE html>

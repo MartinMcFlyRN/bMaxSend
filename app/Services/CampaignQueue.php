@@ -18,7 +18,7 @@ final class CampaignQueue
         }
         return (int) DB::value(
             'SELECT COUNT(DISTINCT s.email) FROM subscribers s
-             WHERE s.list_id IN (' . DB::in($lists) . ") AND s.status = 'subscribed'
+             WHERE s.list_id IN (' . DB::in($lists) . ") AND s.status = 1
                AND NOT EXISTS (SELECT 1 FROM suppressions x WHERE x.client_id = ? AND x.email = s.email)",
             array_merge($lists, [$campaign['client_id']])
         );
@@ -43,8 +43,8 @@ final class CampaignQueue
         $chunk = 1000;
         while ($lists) {
             $rows = DB::all(
-                'SELECT s.id, s.email, s.first_name, s.last_name, s.fields FROM subscribers s
-                 WHERE s.id > ? AND s.list_id IN (' . DB::in($lists) . ") AND s.status = 'subscribed'
+                'SELECT s.id, s.email, s.name, s.fields, s.track FROM subscribers s
+                 WHERE s.id > ? AND s.list_id IN (' . DB::in($lists) . ") AND s.status = 1
                    AND NOT EXISTS (SELECT 1 FROM suppressions x WHERE x.client_id = ? AND x.email = s.email)
                  ORDER BY s.id LIMIT $chunk",
                 array_merge([$lastId], $lists, [$campaign['client_id']])
@@ -56,10 +56,10 @@ final class CampaignQueue
             $params = [];
             foreach ($rows as $r) {
                 $values[] = '(?,?,?,?,?,?,?)';
-                array_push($params, $cid, $r['id'], mb_strtolower($r['email']), $r['first_name'], $r['last_name'], $r['fields'], random_token());
+                array_push($params, $cid, $r['id'], mb_strtolower($r['email']), $r['name'], $r['fields'], (int) $r['track'], random_token());
                 $lastId = (int) $r['id'];
             }
-            DB::query('INSERT IGNORE INTO campaign_recipients (campaign_id, subscriber_id, email, first_name, last_name, fields, token) VALUES '
+            DB::query('INSERT IGNORE INTO campaign_recipients (campaign_id, subscriber_id, email, name, fields, track, token) VALUES '
                 . implode(',', $values), $params);
         }
 

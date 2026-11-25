@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Audit;
 use App\Core\DB;
 use App\Core\Paginator;
+use App\Services\ListFields;
 
 final class ListController extends Controller
 {
@@ -14,7 +15,7 @@ final class ListController extends Controller
     {
         $lists = DB::all(
             "SELECT l.*,
-                    (SELECT COUNT(*) FROM subscribers s WHERE s.list_id = l.id AND s.status = 'subscribed') AS active_count,
+                    (SELECT COUNT(*) FROM subscribers s WHERE s.list_id = l.id AND s.status = 1) AS active_count,
                     (SELECT COUNT(*) FROM subscribers s WHERE s.list_id = l.id) AS total_count
              FROM lists l WHERE l.client_id = ? ORDER BY l.name",
             [$this->uid()]
@@ -43,24 +44,24 @@ final class ListController extends Controller
         $where = ['list_id = ?'];
         $params = [$list['id']];
         $status = (string) input('status', '');
-        if (in_array($status, ['subscribed', 'unsubscribed', 'bounced', 'complained'], true)) {
+        if (in_array($status, ['0', '1', '2'], true)) {
             $where[] = 'status = ?';
-            $params[] = $status;
+            $params[] = (int) $status;
         }
         $q = (string) input('q', '');
         if ($q !== '') {
-            $where[] = '(email LIKE ? OR first_name LIKE ? OR last_name LIKE ?)';
+            $where[] = '(email LIKE ? OR name LIKE ? OR fields LIKE ?)';
             array_push($params, "%$q%", "%$q%", "%$q%");
         }
         $w = implode(' AND ', $where);
         $pg = new Paginator((int) DB::value("SELECT COUNT(*) FROM subscribers WHERE $w", $params), 100);
         $subs = DB::all("SELECT * FROM subscribers WHERE $w ORDER BY id DESC LIMIT {$pg->perPage} OFFSET {$pg->offset}", $params);
-        $counts = [];
+        $counts = [0 => 0, 1 => 0, 2 => 0];
         foreach (DB::all('SELECT status, COUNT(*) n FROM subscribers WHERE list_id = ? GROUP BY status', [$list['id']]) as $r) {
-            $counts[$r['status']] = (int) $r['n'];
+            $counts[(int) $r['status']] = (int) $r['n'];
         }
         $this->view('lists/show', ['title' => $list['name'], 'list' => $list, 'subs' => $subs, 'pg' => $pg,
-            'status' => $status, 'q' => $q, 'counts' => $counts]);
+            'status' => $status, 'q' => $q, 'counts' => $counts, 'fields' => ListFields::all((int) $list['id'])]);
     }
 
     public function update(string $id): void
@@ -91,26 +92,115 @@ final class ListController extends Controller
         redirect('/lists');
     }
 
+    // --- Custom fields ------------------------------------------------------------
+
+    public function addField(string $id): void
+    {
+        $list = $this->find($id);
+        $label = trim((string) input('label', ''));
+        $key = ListFields::normalizeKey((string) input('field_key', '') ?: $label);
+        $back = '/lists/' . $list['id'] . '#fields';
+        if ($key === '') {
+            $this->fail([__('Invalid field name.')], $back);
+        }
+        if (ListFields::isReserved($key)) {
+            $this->fail([__('":key" is a reserved name.', ['key' => $key])], $back);
+        }
+        if (!ListFields::ensure((int) $list['id'], [$key => $label ?: $key])) {
+            $this->fail([__('A field named ":key" already exists.', ['key' => $key])], $back);
+        }
+        flash('success', __('Field :key added.', ['key' => $key]));
+        redirect($back);
+    }
+
+    public function updateField(string $id, string $fid): void
+    {
+        $list = $this->find($id);
+        $err = ListFields::update((int) $list['id'], $this->intParam($fid), (string) input('field_key', ''), (string) input('label', ''));
+        $err ? flash('error', $err) : flash('success', __('Field updated.'));
+        redirect('/lists/' . $list['id'] . '#fields');
+    }
+
+    public function deleteField(string $id, string $fid): void
+    {
+        $list = $this->find($id);
+        ListFields::delete((int) $list['id'], $this->intParam($fid));
+        flash('success', __('Field deleted.'));
+        redirect('/lists/' . $list['id'] . '#fields');
+    }
+
+    // --- Subscribers -------------------------------------------------------------
+
     public function addSubscriber(string $id): void
     {
         $list = $this->find($id);
+        $back = '/lists/' . $list['id'];
         $email = mb_strtolower((string) input('email', ''));
         if (!is_valid_email($email)) {
-            $this->fail([__('Invalid email address.')], '/lists/' . $list['id']);
+            $this->fail([__('Invalid email address.')], $back);
         }
         if (DB::value('SELECT 1 FROM subscribers WHERE list_id = ? AND email = ?', [$list['id'], $email])) {
-            $this->fail([__('This address is already in the list.')], '/lists/' . $list['id']);
+            $this->fail([__('This address is already in the list.')], $back);
         }
         if (!$this->hasRoom(1)) {
-            $this->fail([__('Subscriber limit reached for your account.')], '/lists/' . $list['id']);
+            $this->fail([__('Subscriber limit reached for your account.')], $back);
         }
+        $fields = $this->postedFields((int) $list['id']);
         DB::insert('subscribers', [
             'list_id' => $list['id'], 'email' => $email,
-            'first_name' => mb_substr((string) input('first_name', ''), 0, 100) ?: null,
-            'last_name' => mb_substr((string) input('last_name', ''), 0, 100) ?: null,
-            'fields' => null, 'status' => 'subscribed', 'created_at' => now_utc(), 'updated_at' => now_utc(),
+            'name' => mb_substr((string) input('name', ''), 0, 190) ?: null,
+            'fields' => $fields ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
+            'status' => ListFields::parseStatus((string) input('status', '0')),
+            'track' => ListFields::parseTrack((string) input('track', '0')),
+            'created_at' => now_utc(), 'updated_at' => now_utc(),
         ]);
         flash('success', __('Subscriber added.'));
+        redirect($back);
+    }
+
+    public function editSubscriber(string $id, string $sid): void
+    {
+        $list = $this->find($id);
+        $sub = $this->findSubscriber($list, $sid);
+        $this->view('lists/subscriber', ['title' => $sub['email'], 'list' => $list, 'sub' => $sub,
+            'fields' => ListFields::all((int) $list['id']), 'values' => json_decode((string) $sub['fields'], true) ?: []]);
+    }
+
+    public function updateSubscriber(string $id, string $sid): void
+    {
+        $list = $this->find($id);
+        $sub = $this->findSubscriber($list, $sid);
+        $back = '/lists/' . $list['id'] . '/subscribers/' . $sub['id'];
+        $email = mb_strtolower((string) input('email', ''));
+        if (!is_valid_email($email)) {
+            $this->fail([__('Invalid email address.')], $back);
+        }
+        if (DB::value('SELECT 1 FROM subscribers WHERE list_id = ? AND email = ? AND id <> ?', [$list['id'], $email, $sub['id']])) {
+            $this->fail([__('This address is already in the list.')], $back);
+        }
+        $status = ListFields::parseStatus((string) input('status', '0'));
+        $values = array_merge(json_decode((string) $sub['fields'], true) ?: [], $this->postedFields((int) $list['id'], true));
+        $values = array_filter($values, fn($v) => $v !== '' && $v !== null);
+        DB::update('subscribers', [
+            'email' => $email,
+            'name' => mb_substr((string) input('name', ''), 0, 190) ?: null,
+            'fields' => $values ? json_encode($values, JSON_UNESCAPED_UNICODE) : null,
+            'status' => $status,
+            'track' => ListFields::parseTrack((string) input('track', '0')),
+            'unsubscribed_at' => $status === ListFields::STATUS_UNSUBSCRIBED ? ($sub['unsubscribed_at'] ?: now_utc()) : null,
+            'updated_at' => now_utc(),
+        ], 'id = ?', [$sub['id']]);
+        Audit::log('subscriber.update', ['id' => (int) $sub['id']]);
+        flash('success', __('Subscriber updated.'));
+        redirect($back);
+    }
+
+    public function deleteSubscriber(string $id, string $sid): void
+    {
+        $list = $this->find($id);
+        $sub = $this->findSubscriber($list, $sid);
+        DB::query('DELETE FROM subscribers WHERE id = ?', [$sub['id']]);
+        flash('success', __('Subscriber deleted.'));
         redirect('/lists/' . $list['id']);
     }
 
@@ -122,11 +212,18 @@ final class ListController extends Controller
         if ($ids) {
             $in = DB::in($ids);
             $params = array_merge([$list['id']], $ids);
-            if ($action === 'delete') {
+            $set = match ($action) {
+                'enable' => 'status = 1, unsubscribed_at = NULL',
+                'disable' => 'status = 0, unsubscribed_at = NULL',
+                'unsubscribe' => 'status = 2, unsubscribed_at = COALESCE(unsubscribed_at, UTC_TIMESTAMP())',
+                'track_on' => 'track = 1',
+                'track_off' => 'track = 0',
+                default => null,
+            };
+            if ($set !== null) {
+                DB::query("UPDATE subscribers SET $set, updated_at = UTC_TIMESTAMP() WHERE list_id = ? AND id IN ($in)", $params);
+            } elseif ($action === 'delete') {
                 DB::query("DELETE FROM subscribers WHERE list_id = ? AND id IN ($in)", $params);
-            } elseif ($action === 'unsubscribe') {
-                DB::query("UPDATE subscribers SET status = 'unsubscribed', unsubscribed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()
-                           WHERE list_id = ? AND id IN ($in)", $params);
             } elseif ($action === 'suppress') {
                 foreach (DB::column("SELECT email FROM subscribers WHERE list_id = ? AND id IN ($in)", $params) as $em) {
                     DB::query("INSERT IGNORE INTO suppressions (client_id, email, reason, created_at) VALUES (?, ?, 'manual', UTC_TIMESTAMP())",
@@ -139,97 +236,128 @@ final class ListController extends Controller
         back();
     }
 
+    // --- Import / export ---------------------------------------------------------------
+
     public function importForm(string $id): void
     {
-        $this->view('lists/import', ['title' => __('Import subscribers'), 'list' => $this->find($id)]);
+        $list = $this->find($id);
+        $this->view('lists/import', ['title' => __('Import subscribers'), 'list' => $list, 'fields' => ListFields::all((int) $list['id'])]);
     }
 
     /**
-     * CSV import. The first row is the header. Recognised columns: email,
-     * first_name / nome, last_name / cognome; any other column becomes a custom field.
+     * CSV import. The first row is the header: email (required), nome/name, stato/status
+     * (1 enabled, 0 disabled, 2 unsubscribed), track (1/0). Missing status/track = 0.
+     * Every other column becomes a custom field of the list (created automatically).
      */
     public function import(string $id): void
     {
         $list = $this->find($id);
-        $csv = '';
+        $listId = (int) $list['id'];
+        $back = '/lists/' . $listId . '/import';
         if (!empty($_FILES['file']['tmp_name']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
             if ($_FILES['file']['size'] > (int) config('import.max_bytes', 20 * 1024 * 1024)) {
-                $this->fail([__('The file is too large.')], '/lists/' . $list['id'] . '/import');
+                $this->fail([__('The file is too large.')], $back);
             }
             $csv = (string) file_get_contents($_FILES['file']['tmp_name']);
         } else {
             $csv = (string) ($_POST['paste'] ?? '');
         }
-        $csv = preg_replace('/^\xEF\xBB\xBF/', '', $csv); // BOM
+        $csv = (string) preg_replace('/^\xEF\xBB\xBF/', '', $csv);
         if (!mb_check_encoding($csv, 'UTF-8')) {
             $csv = mb_convert_encoding($csv, 'UTF-8', 'Windows-1252');
         }
         if (trim($csv) === '') {
-            $this->fail([__('Nothing to import.')], '/lists/' . $list['id'] . '/import');
+            $this->fail([__('Nothing to import.')], $back);
         }
 
         $lines = preg_split('/\r\n|\r|\n/', trim($csv));
         $delim = $this->detectDelimiter($lines[0]);
         $first = (string) array_shift($lines);
         $rawHeader = str_getcsv($first, $delim);
-        $header = array_map(fn($h) => $this->normalizeHeader((string) $h), $rawHeader);
-        $emailCol = array_search('email', $header, true);
-        if ($emailCol === false) {
-            // No header row: the first column contains the addresses
-            if (is_valid_email(trim((string) ($rawHeader[0] ?? ''), " \t\"'"))) {
-                array_unshift($lines, $first);
-                $header = array_merge(['email'], array_map(fn($i) => 'field' . $i, range(1, max(1, count($rawHeader) - 1))));
-                if (count($rawHeader) === 1) {
-                    $header = ['email'];
+
+        // Map every column: fixed (email/name/status/track) or custom field key.
+        $map = [];
+        $custom = [];
+        foreach ($rawHeader as $i => $raw) {
+            $key = ListFields::normalizeKey((string) $raw);
+            $fixed = ListFields::fixedColumn($key);
+            if ($fixed !== null) {
+                if (!in_array($fixed, $map, true)) {
+                    $map[$i] = $fixed;
                 }
-                $emailCol = 0;
-            } else {
-                $this->fail([__('The CSV must contain an "email" column.')], '/lists/' . $list['id'] . '/import');
+            } elseif ($key !== '' && !ListFields::isReserved($key) && !in_array('f:' . $key, $map, true)) {
+                $map[$i] = 'f:' . $key;
+                $custom[$key] = trim((string) $raw);
             }
         }
+        if (!in_array('email', $map, true)) {
+            if (is_valid_email(trim((string) ($rawHeader[0] ?? ''), " \t\"'"))) {
+                // No header row: the first column contains the addresses
+                array_unshift($lines, $first);
+                $map = [0 => 'email'];
+                $custom = [];
+            } else {
+                $this->fail([__('The CSV must contain an "email" column.')], $back);
+            }
+        }
+        $has = array_flip($map);
         $updateExisting = (bool) input('update_existing');
         $added = $updated = $skipped = $invalid = 0;
         $room = $this->room();
+        $createdFields = [];
 
-        DB::transaction(function () use ($lines, $delim, $header, $emailCol, $list, $updateExisting, &$added, &$updated, &$skipped, &$invalid, &$room) {
+        DB::transaction(function () use ($lines, $delim, $map, $has, $custom, $listId, $updateExisting,
+            &$added, &$updated, &$skipped, &$invalid, &$room, &$createdFields) {
+            $createdFields = ListFields::ensure($listId, $custom);
             foreach ($lines as $line) {
                 if (trim($line) === '') {
                     continue;
                 }
                 $cols = str_getcsv($line, $delim);
-                $email = mb_strtolower(trim((string) ($cols[$emailCol] ?? '')));
+                $email = mb_strtolower(trim((string) ($cols[$has['email']] ?? '')));
                 if (!is_valid_email($email)) {
                     $invalid++;
                     continue;
                 }
-                $first = $last = null;
+                $name = isset($has['name']) ? (mb_substr(trim((string) ($cols[$has['name']] ?? '')), 0, 190) ?: null) : null;
                 $fields = [];
-                foreach ($header as $i => $h) {
-                    if ($i === $emailCol || $h === '') {
-                        continue;
-                    }
-                    $v = trim((string) ($cols[$i] ?? ''));
-                    if ($h === 'first_name') {
-                        $first = mb_substr($v, 0, 100) ?: null;
-                    } elseif ($h === 'last_name') {
-                        $last = mb_substr($v, 0, 100) ?: null;
-                    } elseif ($v !== '') {
-                        $fields[$h] = mb_substr($v, 0, 500);
+                foreach ($map as $i => $col) {
+                    if (str_starts_with($col, 'f:')) {
+                        $v = trim((string) ($cols[$i] ?? ''));
+                        if ($v !== '') {
+                            $fields[substr($col, 2)] = mb_substr($v, 0, 1000);
+                        }
                     }
                 }
-                $existing = DB::one('SELECT id, fields FROM subscribers WHERE list_id = ? AND email = ?', [$list['id'], $email]);
+                $status = isset($has['status']) ? ListFields::parseStatus($cols[$has['status']] ?? '') : null;
+                $track = isset($has['track']) ? ListFields::parseTrack($cols[$has['track']] ?? '') : null;
+
+                $existing = DB::one('SELECT id, fields, status FROM subscribers WHERE list_id = ? AND email = ?', [$listId, $email]);
                 if ($existing) {
-                    if ($updateExisting) {
-                        $merged = array_merge(json_decode((string) $existing['fields'], true) ?: [], $fields);
-                        DB::update('subscribers', array_filter([
-                            'first_name' => $first, 'last_name' => $last,
-                            'fields' => $merged ? json_encode($merged, JSON_UNESCAPED_UNICODE) : null,
-                            'updated_at' => now_utc(),
-                        ], fn($v) => $v !== null), 'id = ?', [$existing['id']]);
-                        $updated++;
-                    } else {
+                    if (!$updateExisting) {
                         $skipped++;
+                        continue;
                     }
+                    $data = ['updated_at' => now_utc()];
+                    if ($name !== null) {
+                        $data['name'] = $name;
+                    }
+                    if ($fields) {
+                        $merged = array_merge(json_decode((string) $existing['fields'], true) ?: [], $fields);
+                        $data['fields'] = json_encode($merged, JSON_UNESCAPED_UNICODE);
+                    }
+                    // An address that unsubscribed by itself is never re-enabled by an import.
+                    if ($status !== null && (int) $existing['status'] !== ListFields::STATUS_UNSUBSCRIBED) {
+                        $data['status'] = $status;
+                        if ($status === ListFields::STATUS_UNSUBSCRIBED) {
+                            $data['unsubscribed_at'] = now_utc();
+                        }
+                    }
+                    if ($track !== null) {
+                        $data['track'] = $track;
+                    }
+                    DB::update('subscribers', $data, 'id = ?', [$existing['id']]);
+                    $updated++;
                     continue;
                 }
                 if ($room !== null && $room <= 0) {
@@ -237,9 +365,12 @@ final class ListController extends Controller
                     continue;
                 }
                 DB::insert('subscribers', [
-                    'list_id' => $list['id'], 'email' => $email, 'first_name' => $first, 'last_name' => $last,
+                    'list_id' => $listId, 'email' => $email, 'name' => $name,
                     'fields' => $fields ? json_encode($fields, JSON_UNESCAPED_UNICODE) : null,
-                    'status' => 'subscribed', 'created_at' => now_utc(), 'updated_at' => now_utc(),
+                    'status' => $status ?? ListFields::STATUS_DISABLED,
+                    'track' => $track ?? 0,
+                    'unsubscribed_at' => $status === ListFields::STATUS_UNSUBSCRIBED ? now_utc() : null,
+                    'created_at' => now_utc(), 'updated_at' => now_utc(),
                 ]);
                 $added++;
                 if ($room !== null) {
@@ -248,35 +379,36 @@ final class ListController extends Controller
             }
         });
 
-        Audit::log('subscribers.import', ['list' => (int) $list['id'], 'added' => $added, 'updated' => $updated]);
+        Audit::log('subscribers.import', ['list' => $listId, 'added' => $added, 'updated' => $updated, 'fields' => $createdFields]);
         flash('success', __('Import completed: :a added, :u updated, :s skipped, :i invalid.',
             ['a' => $added, 'u' => $updated, 's' => $skipped, 'i' => $invalid]));
+        if ($createdFields) {
+            flash('info', __('New custom fields created: :list', ['list' => implode(', ', $createdFields)]));
+        }
+        if (!isset($has['status'])) {
+            flash('info', __('The file has no "stato" column: new subscribers were imported as disabled (0). Enable them before sending.'));
+        }
         if ($room !== null && $room <= 0 && $skipped > 0) {
             flash('error', __('Subscriber limit reached for your account.'));
         }
-        redirect('/lists/' . $list['id']);
+        redirect('/lists/' . $listId);
     }
 
+    /** Export in the same format accepted by the import (round trip). */
     public function export(string $id): void
     {
         $list = $this->find($id);
-        $rows = DB::all('SELECT email, first_name, last_name, status, fields, created_at, unsubscribed_at FROM subscribers WHERE list_id = ? ORDER BY id', [$list['id']]);
-        $extra = [];
-        foreach ($rows as $r) {
-            foreach (array_keys(json_decode((string) $r['fields'], true) ?: []) as $k) {
-                $extra[$k] = true;
-            }
-        }
-        $extra = array_keys($extra);
+        $keys = ListFields::keys((int) $list['id']);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="list-' . $list['id'] . '-' . gmdate('Ymd') . '.csv"');
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, array_merge(['email', 'first_name', 'last_name', 'status', 'created_at', 'unsubscribed_at'], $extra), ';');
-        foreach ($rows as $r) {
+        fputcsv($out, array_merge(['email', 'nome', 'stato', 'track'], $keys), ';');
+        $st = DB::query('SELECT email, name, status, track, fields FROM subscribers WHERE list_id = ? ORDER BY id', [$list['id']]);
+        while ($r = $st->fetch()) {
             $f = json_decode((string) $r['fields'], true) ?: [];
-            $line = [$r['email'], $r['first_name'], $r['last_name'], $r['status'], $r['created_at'], $r['unsubscribed_at']];
-            foreach ($extra as $k) {
+            $line = [$r['email'], $r['name'], $r['status'], $r['track']];
+            foreach ($keys as $k) {
                 $line[] = $f[$k] ?? '';
             }
             fputcsv($out, $line, ';');
@@ -365,16 +497,26 @@ final class ListController extends Controller
         return $best;
     }
 
-    private function normalizeHeader(string $h): string
+    private function findSubscriber(array $list, string $sid): array
     {
-        $h = mb_strtolower(trim($h, " \t\"'"));
-        $h = preg_replace('/[^a-z0-9_]+/', '_', $h);
-        $h = trim((string) $h, '_');
-        return match ($h) {
-            'e_mail', 'mail', 'email_address', 'indirizzo_email' => 'email',
-            'nome', 'firstname', 'first', 'name' => 'first_name',
-            'cognome', 'lastname', 'last', 'surname' => 'last_name',
-            default => $h,
-        };
+        $sub = DB::one('SELECT * FROM subscribers WHERE id = ? AND list_id = ?', [$this->intParam($sid), $list['id']]);
+        if (!$sub) {
+            $this->abort(404);
+        }
+        return $sub;
+    }
+
+    /** Custom field values from the form (only fields defined for the list). */
+    private function postedFields(int $listId, bool $keepEmpty = false): array
+    {
+        $posted = (array) ($_POST['fields'] ?? []);
+        $out = [];
+        foreach (ListFields::keys($listId) as $k) {
+            $v = trim((string) ($posted[$k] ?? ''));
+            if ($v !== '' || ($keepEmpty && array_key_exists($k, $posted))) {
+                $out[$k] = mb_substr($v, 0, 1000);
+            }
+        }
+        return $out;
     }
 }

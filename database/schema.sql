@@ -118,10 +118,10 @@ CREATE TABLE IF NOT EXISTS subscribers (
     id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
     list_id         INT UNSIGNED NOT NULL,
     email           VARCHAR(190) NOT NULL,
-    first_name      VARCHAR(100) NULL,
-    last_name       VARCHAR(100) NULL,
-    fields          TEXT NULL COMMENT 'JSON object with custom fields',
-    status          ENUM('subscribed','unsubscribed','bounced','complained') NOT NULL DEFAULT 'subscribed',
+    name            VARCHAR(190) NULL,
+    fields          TEXT NULL COMMENT 'JSON object {field_key: value}, keys defined in list_fields',
+    status          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 = disabled, 1 = enabled, 2 = unsubscribed',
+    track           TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '1 = opens/clicks tracked, 0 = not tracked',
     created_at      DATETIME NOT NULL,
     updated_at      DATETIME NOT NULL,
     unsubscribed_at DATETIME NULL,
@@ -130,6 +130,20 @@ CREATE TABLE IF NOT EXISTS subscribers (
     KEY idx_subscribers_status (list_id, status),
     KEY idx_subscribers_email (email),
     CONSTRAINT fk_subscribers_list FOREIGN KEY (list_id) REFERENCES lists (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Custom fields of each list. Created automatically from the CSV header on
+-- import, or by hand; usable in the emails as {{field_key}}.
+CREATE TABLE IF NOT EXISTS list_fields (
+    id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    list_id         INT UNSIGNED NOT NULL,
+    field_key       VARCHAR(64) NOT NULL,
+    label           VARCHAR(150) NOT NULL,
+    position        INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_list_fields_key (list_id, field_key),
+    CONSTRAINT fk_list_fields_list FOREIGN KEY (list_id) REFERENCES lists (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Per-client suppression list: these addresses are never mailed by that client.
@@ -193,9 +207,9 @@ CREATE TABLE IF NOT EXISTS campaign_recipients (
     campaign_id     INT UNSIGNED NOT NULL,
     subscriber_id   INT UNSIGNED NULL,
     email           VARCHAR(190) NOT NULL,
-    first_name      VARCHAR(100) NULL,
-    last_name       VARCHAR(100) NULL,
+    name            VARCHAR(190) NULL,
     fields          TEXT NULL,
+    track           TINYINT UNSIGNED NOT NULL DEFAULT 0,
     token           CHAR(32) NOT NULL,
     status          ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
     attempts        TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -272,6 +286,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     PRIMARY KEY (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO schema_migrations (version, applied_at) VALUES ('0001_initial', UTC_TIMESTAMP());
+INSERT IGNORE INTO schema_migrations (version, applied_at) VALUES ('0001_initial', UTC_TIMESTAMP()), ('0002_subscriber_fields', UTC_TIMESTAMP());
 
 SET foreign_key_checks = 1;

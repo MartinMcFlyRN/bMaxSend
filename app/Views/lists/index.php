@@ -7,7 +7,7 @@
   <button class="btn btn-primary" type="submit"><?= e(__('Create list')) ?></button>
 </form>
 <table class="table">
-  <thead><tr><th><?= e(__('Name')) ?></th><th class="num"><?= e(__('Active')) ?></th><th class="num"><?= e(__('Total')) ?></th><th><?= e(__('Created')) ?></th></tr></thead>
+  <thead><tr><th><?= e(__('Name')) ?></th><th class="num"><?= e(__('Enabled')) ?></th><th class="num"><?= e(__('Total')) ?></th><th><?= e(__('Created')) ?></th></tr></thead>
   <tbody>
   <?php foreach ($lists as $l): ?>
     <tr>

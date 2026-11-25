@@ -18,7 +18,7 @@ echo App\Core\View::partial('partials/pagehead', ['heading' => $c['id'] ? $c['na
   <fieldset <?= $editable ? '' : 'disabled' ?>>
   <div class="panel form-grid">
     <label class="full"><?= e(__('Campaign name (internal)')) ?><input name="name" value="<?= e($v('name')) ?>" required></label>
-    <label class="full"><?= e(__('Subject')) ?><input name="subject" value="<?= e($v('subject')) ?>" placeholder="<?= e(__('e.g. News of the month for {{first_name}}')) ?>"></label>
+    <label class="full"><?= e(__('Subject')) ?><input name="subject" value="<?= e($v('subject')) ?>" placeholder="<?= e(__('e.g. News of the month for {{name}}')) ?>"></label>
     <label class="full"><?= e(__('Preheader')) ?> <small class="muted"><?= e(__('preview text shown by mail clients after the subject')) ?></small><input name="preheader" value="<?= e($v('preheader')) ?>"></label>
     <label><?= e(__('Sender name')) ?><input name="from_name" value="<?= e($v('from_name')) ?>"></label>
     <label><?= e(__('Sender email')) ?><input type="email" name="from_email" value="<?= e($v('from_email')) ?>" placeholder="news@example.com"></label>
@@ -44,7 +44,7 @@ echo App\Core\View::partial('partials/pagehead', ['heading' => $c['id'] ? $c['na
         <?php endforeach; ?>
         <?php if (!$lists): ?><span class="muted"><?= e(__('No lists yet.')) ?> <a href="<?= e(url('/lists')) ?>"><?= e(__('Create a list')) ?></a></span><?php endif; ?>
       </div>
-      <?php if ($estimate !== null): ?><p class="muted small"><?= e(__('Estimated recipients (deduplicated, without unsubscribed and suppressed): :n', ['n' => nf($estimate)])) ?></p><?php endif; ?>
+      <?php if ($estimate !== null): ?><p class="muted small"><?= e(__('Tracking of opens and clicks applies only to subscribers with track = 1.')) ?><br><?= e(__('Estimated recipients (status 1, deduplicated, without suppressed addresses): :n', ['n' => nf($estimate)])) ?></p><?php endif; ?>
     </div>
   </div>
 
@@ -65,9 +65,10 @@ echo App\Core\View::partial('partials/pagehead', ['heading' => $c['id'] ? $c['na
       </div>
       <div data-pane="help" hidden class="help">
         <table class="table small">
-          <tr><td><code>{{first_name}}</code> <code>{{last_name}}</code> <code>{{full_name}}</code> <code>{{email}}</code></td><td><?= e(__('Subscriber data')) ?></td></tr>
-          <tr><td><code>{{first_name|cliente}}</code></td><td><?= e(__('Value with a fallback when empty')) ?></td></tr>
+          <tr><td><code>{{name}}</code> <code>{{email}}</code></td><td><?= e(__('Subscriber data')) ?></td></tr>
+          <tr><td><code>{{name|cliente}}</code></td><td><?= e(__('Value with a fallback when empty')) ?></td></tr>
           <tr><td><code>{{citta}}</code></td><td><?= e(__('Any custom field imported from CSV (column name)')) ?></td></tr>
+          <?php foreach ($fieldTags as $ft): ?><tr><td><code>{{<?= e($ft['field_key']) ?>}}</code></td><td><?= e($ft['label']) ?> <span class="muted">(<?= e($ft['list_name']) ?>)</span></td></tr><?php endforeach; ?>
           <tr><td><code>{{unsubscribe_url}}</code></td><td><?= e(__('Unsubscribe link (added automatically in the footer if missing)')) ?></td></tr>
           <tr><td><code>{{webversion_url}}</code></td><td><?= e(__('Link to the web version of the email')) ?></td></tr>
           <tr><td><code>{{date}}</code> <code>{{year}}</code></td><td><?= e(__('Sending date')) ?></td></tr>

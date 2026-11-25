@@ -10,8 +10,9 @@ use App\Core\DB;
  * Turns a campaign + a recipient into the final, personalised message.
  *
  * Merge tags (in subject, HTML and text):
- *   {{email}} {{first_name}} {{last_name}} {{full_name}} {{any_custom_field}}
- *   {{first_name|fallback}}  value with a default when empty
+ *   {{email}} {{name}} {{any_custom_field_key}}
+ *   {{name|fallback}}  value with a default when empty
+ *   ({{first_name}} / {{full_name}} are kept as aliases of {{name}})
  *   {{unsubscribe_url}} {{webversion_url}} {{date}} {{year}}
  */
 final class MessageBuilder
@@ -68,7 +69,7 @@ final class MessageBuilder
     }
 
     /**
-     * @param array $r recipient: email, first_name, last_name, fields (JSON|array), token
+     * @param array $r recipient: email, name, fields (JSON|array), track, token
      * @param bool  $forWeb rendering for the web version (no open pixel)
      * @return array{subject:string, html:string, text:string, headers:array<string,string>}
      */
@@ -77,9 +78,11 @@ final class MessageBuilder
         $vars = $this->vars($r);
         $urls = $this->urls($r);
         $html = (string) $this->campaign['html_body'];
+        // Tracking only if enabled on the campaign AND on the subscriber (track = 1).
+        $track = !empty($r['id']) && (int) ($r['track'] ?? 0) === 1;
 
         if ($html !== '') {
-            if ($this->campaign['track_clicks'] && !empty($r['id'])) {
+            if ($this->campaign['track_clicks'] && $track) {
                 $html = $this->rewriteLinks($html, (string) $r['token']);
             }
             if (!str_contains($html, '{{unsubscribe_url}}')) {
@@ -89,7 +92,7 @@ final class MessageBuilder
                 $html = $this->injectPreheader($html, (string) $this->campaign['preheader']);
             }
             $html = $this->merge($html, $vars, true);
-            if (!$forWeb && $this->campaign['track_opens'] && !empty($r['id'])) {
+            if (!$forWeb && $this->campaign['track_opens'] && $track) {
                 $pixel = '<img src="' . e($urls['open']) . '" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0" />';
                 $html = $this->injectBeforeBodyEnd($html, $pixel);
             }
@@ -131,9 +134,9 @@ final class MessageBuilder
             $vars[strtolower((string) $k)] = is_scalar($v) ? (string) $v : '';
         }
         $vars['email'] = (string) $r['email'];
-        $vars['first_name'] = (string) ($r['first_name'] ?? '');
-        $vars['last_name'] = (string) ($r['last_name'] ?? '');
-        $vars['full_name'] = trim($vars['first_name'] . ' ' . $vars['last_name']);
+        $vars['name'] = (string) ($r['name'] ?? '');
+        $vars['first_name'] = $vars['name'];
+        $vars['full_name'] = $vars['name'];
         $vars['date'] = fmt_dt(now_utc(), 'd/m/Y');
         $vars['year'] = gmdate('Y');
         $vars['unsubscribe_url'] = $urls['unsubscribe'];
